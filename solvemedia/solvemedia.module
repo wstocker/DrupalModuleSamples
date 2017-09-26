@@ -88,7 +88,7 @@ function solvemedia_json($email = false, $return = false) {
       $email = $_POST['to'];
   }
   //If we are setting email correctly
-  if(!empty($email)):
+  if(!empty($email)){
      //Load the lib
      $site_id = solvemedia_get_config();
      $u_data = array(                                      
@@ -147,9 +147,9 @@ function solvemedia_user_insert(&$edit, &$account, $category) {
  * Set the Solve Media script in a session.
 */
 function _solvemedia_set_sm_session($script){
-   if(empty($_SESSION['SESSsmscript'])): 
+   if(empty($_SESSION['SESSsmscript'])){ 
       $_SESSION['SESSsmscript'] = $script;
-   endif;   
+   }
 }
 
 /*
@@ -157,11 +157,12 @@ function _solvemedia_set_sm_session($script){
  */
 function _solvemedia_get_protocol(){
    $protocol = isset($_SERVER["HTTPS"]) ? 'https' : 'http'; 
-    if ($protocol == 'https'):
+    if ($protocol == 'https'){
        $use_ssl = true;
-    else:
+    }
+    else {
        $use_ssl = false;
-    endif; 
+    } 
     return $use_ssl;  
 }
 

@@ -75,7 +75,7 @@ function _sailthru_get_list($components, $field, $value) {
 */
 function _sailthru_batch_submit_check_for_email($input_values) {
    foreach($input_values as $value){
-      if(filter_var($value, FILTER_VALIDATE_EMAIL)):
+      if(filter_var($value, FILTER_VALIDATE_EMAIL)){
 	     $email = $value;
 	  }
    }
@@ -91,7 +91,7 @@ function _sailthru_process_list_array($lists) {
    $lists = explode(',', $lists);
    if(is_array($lists)){
      $lists_multiple = array();
-     foreach($lists as $key => $value):
+     foreach($lists as $key => $value){
          $lists_multiple[$value]= 1;
      }
       return $lists_multiple;
@@ -172,7 +172,7 @@ function sailthru_submit_function($form, &$form_state) {
                }
                $first_name = $form_state['complete form']['submitted']['first_name'];  
                //Make our posts to Sailthru here
-               if(!empty($source) && empty($first_name)):     
+               if(!empty($source) && empty($first_name)){    
                   $response = $sailthru->apiPost('user',
                    array('id' => $emails,
                         'optout_email'=>'none',
@@ -183,7 +183,7 @@ function sailthru_submit_function($form, &$form_state) {
                         'lists' => $lists_multiple
                         )
                      );
-                     if(!empty($source) && !empty($first_name)):
+                     if(!empty($source) && !empty($first_name)){
                          $response = $sailthru->apiPost('user',
                             array('id' => $emails,
                             'optout_email'=>'none',
@@ -233,7 +233,7 @@ function sailthru_submit_jquery_webforms() {
 	          $title = "Like Form";
 	       break;
 	    }
-     if($title):
+     if($title){
   	    //Get the most recently submitted webform
 		$query = new EntityFieldQuery();
 		$entities = $query->entityCondition('entity_type', 'node')
