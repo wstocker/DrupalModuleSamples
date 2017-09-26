@@ -1,0 +1,6 @@
+name = Sailthru
+description = Integration Between the Sailthru API and National Review
+php = 7.0
+core = 7.x
+
+configure = admin/config/sailthru/api

@@ -1,0 +1,421 @@
+<?php
+/*
+ * Implementation of hook_menu
+*/
+function solvemedia_menu() {
+   //Callback used for forms sumbitted with ajax
+   $items['solvemedia/callback'] = array(
+      'access callback' => TRUE,
+	  'page callback' => 'solvemedia_json',
+	  'access arguments' => array('Access solve media via ajax'),
+	  'type' => MENU_CALLBACK,
+	);
+	
+   //Unset session variable	
+   $items['solvemedia/unset'] = array(
+      'access callback' => TRUE,
+	  'page callback' => 'solvemedia_unset',
+	  'access arguments' => array('Access solve media via ajax'),
+	  'type' => MENU_CALLBACK,
+   );
+   
+   //Admin section to set up captcha 
+   $items['admin/config/people/captcha/solvemedia'] = array(
+    'title' => 'Solve Media',
+    'description' => 'Administer the Solve Media web service.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('solvemedia_admin_settings'),
+    'access arguments' => array('administer Solve Media settings'),
+    'type' => MENU_LOCAL_TASK,
+    'file' => 'solvemedia.admin.inc',
+  );
+   
+   return $items;
+}
+
+/**
+ * Solve Media config id and loading the library into Drupal
+ */
+function solvemedia_get_config() {
+   //Include the Solve Media library
+   $site_id = "1234";
+   module_load_include('php', 'solvemedia', 'solvemedia/solvemedialib');
+   module_load_include('php', 'solvemedia', 'library/Solvemedia_Dapi_Lib');
+   return $site_id;
+}
+
+/**
+ * Implements hook_init().
+ */
+function solvemedia_init() {
+   $args = arg();
+   if (path_is_admin(current_path())){
+     $is_admin = true; 
+   }
+   //If not on an admin page, on a node page and the node page is not the homepage
+   if ((empty($is_admin) && 
+        $args[0] == 'node' && 
+        $args[1] != '378882' && 
+        $args[1] != '427581') 
+        //Or if on the user register page or author bio page
+        || ($args[0] == 'user' && 
+        (!empty($args[1]) && 
+        $args[1] == 'register')) 
+        || ($args[0] == 'author')){
+            drupal_add_js(drupal_get_path('module', 'solvemedia') . '/js/solvemedia.js');
+   } 
+   //Javascript to unset the session
+   if(isset($_SESSION['SESSsmscript'])){
+      drupal_add_js(drupal_get_path('module', 'solvemedia') . '/js/session.js');
+   } 
+}
+
+/**
+ * Custom callback to unset session variables
+ */
+function solvemedia_unset() { 
+   if(!empty($_SESSION['SESSsmscript'])){  
+      unset($_SESSION["SESSsmscript"]);
+   }   
+}
+
+/*
+ * Get solvemedia client and create object for use
+ */
+function solvemedia_json($email = false, $return = false) {
+  //If not passsing email argument, it is being posted by callback.
+  if(empty($email) && $_SERVER['REQUEST_METHOD'] == 'POST'){
+      $email = $_POST['to'];
+  }
+  //If we are setting email correctly
+  if(!empty($email)):
+     //Load the lib
+     $site_id = solvemedia_get_config();
+     $u_data = array(                                      
+        //end-user data    
+       'hema'=> solvemedia_hash_email($email)
+     );
+     $solvemedia = solvemedia_get_dapi_json($site_id, $u_data, $use_ssl = false);
+     //Generate the json that is used to set SM config variable
+     if(!empty($solvemedia)){
+        if($return == false){
+           echo $solvemedia;
+        }
+        if($return == true){
+           return $solvemedia;
+        }
+        else {
+           _solvemedia_log_error_msg();
+        } 
+     } 
+}
+
+/**
+ * Implements hook_process_html().
+ */
+function solvemedia_process_html(&$variables) { 
+   //If the SM session is set include the script in html.tpl.php
+   if(!empty($_SESSION['SESSsmscript'])){
+      $sm_script = $_SESSION['SESSsmscript'];
+         if(!empty($sm_script)){
+            $use_ssl = _solvemedia_get_protocol(); 
+            $sm_server = _solvemedia_get_server($use_ssl);
+            //Set the sm script variable and server in html.tpl.php
+            $variables['sm_script'] = $sm_script;
+            $variables['sm_server'] = $sm_server;
+         }
+    }
+}
+
+/**
+ * Implements hook_user_insert for Facebook Registration().
+ */
+function solvemedia_user_insert(&$edit, &$account, $category) {
+   if(isset($edit['fboauth_fbid'])){
+      $use_ssl = _solvemedia_get_protocol();  
+      $return = true;
+      $script= solvemedia_json($account->mail, $return);
+      if(!empty($script)){
+         $script = base64_encode($script);
+         //We just logged in with Facebook for the first time, so save json in session.
+         _solvemedia_set_sm_session($script);  
+      } 
+   }
+}
+
+/**
+ * Set the Solve Media script in a session.
+*/
+function _solvemedia_set_sm_session($script){
+   if(empty($_SESSION['SESSsmscript'])): 
+      $_SESSION['SESSsmscript'] = $script;
+   endif;   
+}
+
+/*
+ * Get protocol for Solve Media Request
+ */
+function _solvemedia_get_protocol(){
+   $protocol = isset($_SERVER["HTTPS"]) ? 'https' : 'http'; 
+    if ($protocol == 'https'):
+       $use_ssl = true;
+    else:
+       $use_ssl = false;
+    endif; 
+    return $use_ssl;  
+}
+
+/*
+ * Get the url per protocol the callback is made from
+ */
+function _solvemedia_get_server($use_ssl = false) {
+   if($use_ssl){
+      $server = 'https://data-secure.circulate.com';
+   }
+   else {
+      $server = 'http://data.circulate.com';
+   }
+   return $server;
+} 
+
+/*
+ * Log errors if error response comes back from sailthru API request
+ */
+function _solvemedia_log_error_msg() {
+   watchdog('solvemedia', t('Solve Media was unable to make an update on their side of the API.'));
+}
+
+/*
+ * @return string - The JSON to be embedded in the end-user's page (For AJAX callbacks.)
+*/
+function solvemedia_get_dapi_json($site_id, $user_data, $use_ssl = false, $site_path = "/", $site_domain = "") {
+    if( $site_id == null || empty($site_id)){
+        watchdog('solvemedia', t('A unique site identifier is required to use the Solve Media data API. Contact Solve Media (http://www.solvemedia.com) if you do not have one."'));
+        return;
+    }
+    // we can't cookie users who don't accept cookies, assume that users who don't
+    // have a single cookie don't accept cookies
+    // we also don't collect data too often
+    if( !count($_COOKIE) || solvemedia_get_dapi_session_ck()){
+        return;
+    }
+    $sm_info = array();
+    // remove any key-value pairs with an empty value
+    foreach( $user_data as $key => $value ){
+        $value = preg_replace('/\s+$/', '', $value);
+        $value = preg_replace('/^\s+/', '', $value);
+
+        if($key == 'email'){
+            $value = strtolower($value);
+        }
+        if($value){
+            $sm_info[$key] = $value;
+        }
+    //End foreach
+    }
+    if(!count($sm_info)){
+        return;
+    }
+    $sm_info['sid'] = $site_id;
+    solvemedia_set_dapi_session_ck($site_path, $site_domain);
+    $json = json_encode($sm_info);
+
+    return $json;
+}
+
+/**
+ * @file
+ * Uses the Solve Media captcha replacement widget to secure and monetize your Drupal site.
+ */
+
+/**
+* Implementation of hook_help().
+*/
+function solvemedia_help($section = '') {
+   $output = '';
+   switch ($section) {
+      case 'admin/modules#name':
+         $output .= t('Solve Media');
+      break;
+      case 'admin/modules#description':
+      case 'admin/user/captcha/solvemedia':
+         $output .= t('Uses the <a href="@url" target="_blank">Solve Media</a> captcha replacement widget to secure and monetize your Drupal site.', 
+         array('@url' => url('http://www.solvemedia.com')));
+      break;
+      case 'admin/help#solvemedia':
+         $output .= '<p>'.
+        t('Uses the Solve Media captcha replacement widget to secure and monetize your Drupal site. For more information on Solve Media, visit <a href="@url" target="_blank">the official website</a>.', 
+        array('@url' => url('http://www.solvemedia.com'))) .
+        '</p><h3>'.
+        t('Configuration') .
+        '</h3><p>'.
+        t('The settings associated with Solve Media can be found in the <a href="@solvemediatab">Solve Media tab</a>, in the <a href="@captchasettings">CAPTCHA settings</a>. You must set your Solve Media public, private, and hash keys in order to use the module. Once the public, private, and hash keys are set, visit the <a href="@captchasettings">CAPTCHA settings</a>, where you can choose where to display the Solve Media widget.', 
+        array('@solvemediatab' => url('admin/config/people/captcha/solvemedia'), '@captchasettings' => url('admin/config/people/captcha'))) .
+        '</p>';
+      break;
+  }
+  return $output;
+}
+
+
+/**
+ * Implementation of hook_perm().
+ */
+function solvemedia_permission() {
+   return array('administer Solve Media settings' => array(
+      'title' => t('Administer Solve Media settings'),
+      ),
+   );
+}
+
+/**
+ * Implementation of hook_captcha().
+ */
+function solvemedia_captcha() {
+   $args = func_get_args();
+   $op = array_shift($args); 
+   switch ($op) {
+     case 'list':
+        return array('Solve Media');
+     case 'generate':
+        $captcha_type = array_shift($args);
+         $captcha = array();
+      if ($captcha_type == 'Solve Media') {
+        // Load the solvemedia library.
+        _adcopy_load_library();
+
+        // Retrieve configuration variables from database.
+        $adcopy_secure_connection = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] == 'on');
+        $adcopy_theme = variable_get('adcopy_theme', 'white');
+        $adcopy_tabindex = variable_get('adcopy_tabindex', NULL);
+        $adcopy_public_key = variable_get('adcopy_public_key', '');
+        $adcopy_lang = variable_get('adcopy_lang', 'en');
+        $adcopy_form_value = NULL;
+        $adcopy_show_on_comment_focus = variable_get('adcopy_show_on_comment_focus', FALSE);
+        
+        // Construct the Javascript, but only display it once.
+        static $_adcopy_jsadded = FALSE;
+        if ($_adcopy_jsadded == FALSE) {
+          $_adcopy_jsadded = TRUE;
+          $adcopy_options = array(
+            'theme' => $adcopy_theme,
+            'lang' => $adcopy_lang,
+          );
+
+          // Set the default tab index.
+          if (!empty($adcopy_tabindex)) {
+            $adcopy_options['tabindex'] = $adcopy_tabindex;
+          }
+          drupal_add_js('var ACPuzzleOptions = '. drupal_json_encode($adcopy_options) .';', 'inline');
+        }
+
+        // Create the form. Captcha requires TRUE to be returned in solution.
+        $captcha['solution'] = TRUE;
+        $captcha['captcha_validate'] = 'solvemedia_captcha_validation';
+        if ($adcopy_show_on_comment_focus){
+          $modified_code = _modified_widget_code($adcopy_public_key, $adcopy_secure_connection);
+          $html = $modified_code["html"];
+          drupal_add_js($modified_code["js"], 'inline');
+        } else {
+          $html = solvemedia_get_html($adcopy_public_key, NULL, $adcopy_secure_connection);          
+        }
+        $captcha['form']['captcha_response'] = array(
+          '#type' => 'hidden',
+          '#value' => 'Solve Media',
+        );
+        $captcha['form']['captcha_form'] = array(
+          '#type' => 'item',
+          '#markup' => $html,
+        );
+      }     
+     return $captcha;
+  }
+}
+
+/**
+ * CAPTCHA Callback; Validates the Solve Media code.
+ */
+function solvemedia_captcha_validation($solution = NULL, $response = NULL) {
+  if ($response == 'Solve Media' && isset($_POST['adcopy_challenge']) && isset($_POST['adcopy_response'])){
+    $resp = solvemedia_check_answer(
+      variable_get('adcopy_private_key', ''),
+      $_SERVER['REMOTE_ADDR'],
+      $_POST['adcopy_challenge'],
+      $_POST['adcopy_response'],
+      variable_get('adcopy_hash_key','')
+    );
+    if ($resp->is_valid) {
+      return TRUE;
+    } else {
+      form_set_error('captcha_response', t('The Solve Media response you entered was incorrect.'));
+      return FALSE;
+    }
+  }
+  return FALSE;
+}
+
+
+/**
+ * Load the solvemedia library.
+ */
+function _adcopy_load_library() {
+  module_load_include('php', 'solvemedia', 'solvemedia/solvemedialib');
+}
+
+
+/**
+ * Modify widget code.
+ */
+function _modified_widget_code($pubkey, $secure) {
+   $server = $secure ? ADCOPY_API_SECURE_SERVER : ADCOPY_API_SERVER;
+   $html = '<div id="solvemedia_container"></div>';
+   $html .= <<<NOSCRIPT
+	<noscript>
+	  <iframe src="{$server}/papi/challenge.noscript?k={$pubkey}" height="300" width="500" frameborder="0"></iframe><br/>
+	  <textarea name="adcopy_challenge" rows="3" cols="40"></textarea>
+	  <input type="hidden" name="adcopy_response" value="manual_challenge"/>
+	</noscript>
+	NOSCRIPT;
+	
+	$js = <<<JAVASCRIPT
+	var show_puzzle = 0;
+	function create_widget(click) {
+	  comment_box = get_comment_box();
+	  if (typeof(ACPuzzle) != 'undefined' && (click || show_puzzle)){
+	    ACPuzzle.create('{$pubkey}', 'solvemedia_container', ACPuzzleOptions);
+	    if (comment_box) {
+	      comment_box.unbind('focus');
+	    }
+	  } else if (click) {
+	    comment_box.unbind('focus');
+	    show_puzzle = 1;
+	  }
+	}
+	
+	function set_on_focus() {
+	  comment_box = get_comment_box();
+	  if (comment_box && !(comment_box[0].value || (document.activeElement == comment_box[0]))) {
+	    comment_box.bind('focus', function(){create_widget(1)});
+	  } else {
+	    show_puzzle = 1;
+	  }
+	  ACPuzzleOptions.onload = create_widget;
+	  ajax = document.createElement('script');
+	  ajax.type = "text/javascript";
+	  ajax.src = "{$server}/papi/challenge.ajax";
+	  document.getElementsByTagName('head')[0].appendChild(ajax);
+	}
+	
+	function get_comment_box() {
+	  e = jQuery('textarea[name*="comment"]');
+	  if (e.length) {
+	    return e;
+	  }
+	  return undefined;
+	}
+	
+	jQuery(document).ready(set_on_focus);
+	JAVASCRIPT;
+	
+	return array("html" => $html, "js" => $js);
+}

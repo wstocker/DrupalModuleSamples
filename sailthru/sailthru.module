@@ -1,0 +1,272 @@
+<?php
+/*
+ * Implementation of hook_menu
+ */
+function sailthru_menu() {
+   
+   $items['admin/config/sailthru/api'] = array(
+      'title' => 'Sailthru API Settings',
+      'description' => 'Configuration for Current posts module',
+      'page callback' => 'drupal_get_form',
+      'page arguments' => array('sailthru_api_config'),
+      'access arguments' => array('administer site configuration'),
+      'file' => 'sailthru.admin.inc',
+      'type' => MENU_NORMAL_ITEM,
+   );
+
+    $items['sailthru/callback'] = array(
+	   'title' => '',
+       'access callback' => TRUE,
+	   'page callback' => 'sailthru_submit_jquery_webforms',
+	   'access arguments' => array('access sailthru via ajax'),
+	   'type' => MENU_CALLBACK,
+	);
+   
+   return $items;
+}
+
+/*
+ * Get sailthru client and create object for use
+*/
+function sailthru_client_get_client() {
+ //Get API Key and Secret
+  $default_key = variable_get('sailthru_api_key');
+  $default_secret = variable_get('sailthru_api_secret');
+  if (empty($default_key) || empty($default_secret)){
+    watchdog('sailthru', t('The Sailthru API Key has not been configured. Please visit the configuration page.'));
+    drupal_set_message(t('Unable to connect to Sailthru, please check your settings'), 'error', false);
+    return false;
+  }
+  module_load_include('php', 'sailthru', 'sailthru/Sailthru_Util');
+  module_load_include('php', 'sailthru', 'sailthru/Sailthru_Client_Exception');
+  module_load_include('php', 'sailthru', 'sailthru/Sailthru_Client');
+
+  $sailthru = new Sailthru_Client($default_key, $default_secret);
+  return  $sailthru;
+}
+
+/*
+ * Implementation of hook_form_alter
+ */
+function sailthru_form_alter(&$form, &$form_state) {
+   //If the hidden field named source_list with the Title Source List exists, than we need to send a value to the sailthru API
+   if (!empty($form['submitted']['source_list'])){
+      $form['#submit'][] = 'sailthru_submit_function';
+   }
+   else {
+      $form['submitted']['source_list'] = false;
+   }
+}
+
+/*
+ * Get list name from webform components. Used for jquery webform
+*/
+function _sailthru_get_list($components, $field, $value) {
+   foreach($components as $key => $component){
+      if ( $component[$field] === $value){
+         return $component['value'];
+      }
+   }
+   return false;
+}
+
+/*
+ * Get list email feild
+*/
+function _sailthru_batch_submit_check_for_email($input_values) {
+   foreach($input_values as $value){
+      if(filter_var($value, FILTER_VALIDATE_EMAIL)):
+	     $email = $value;
+	  }
+   }
+   return $email;
+}
+
+/*
+ * Process comma delimited list into array
+*/
+function _sailthru_process_list_array($lists) {
+   $lists = preg_replace('/\s+/', '', $lists);
+   $lists = rtrim($lists,',');
+   $lists = explode(',', $lists);
+   if(is_array($lists)){
+     $lists_multiple = array();
+     foreach($lists as $key => $value):
+         $lists_multiple[$value]= 1;
+     }
+      return $lists_multiple;
+   }
+}
+
+/*
+ * Log errors if error response comes back from sailthru API request
+ */
+function _sailthru_log_error_msg($error) {
+   watchdog('sailthru', t('The Sailthru was unable to make an update on their side of the API. Error message was ' . $error) .
+   ' ' . l('Configure Sailthru Module', 'admin/config/sailthru/api'));
+}
+
+/*
+ * Process webform request to sailthru
+*/
+function sailthru_submit_function($form, &$form_state) {
+    if(!empty($form['submitted']['source_list'])){
+      //Check to see if we have field groups    
+       foreach($form['submitted'] as $submitted){
+          if(!empty($submitted['#value']) && $submitted['#webform_component']['extra']['wrapper_classes'] == 'field_group'){
+              //If we have field groups than put the values into an array
+              $lists[] = $submitted['#webform_component']['value'];
+          }
+       }
+       if(!empty($lists)){
+          $lists_multiple = array();
+          foreach($lists as $list){
+             if(strpos($list, ',') !== false){
+                 $lists_processed = _sailthru_process_list_array($list);
+             }
+             else {
+	           $lists_multiple[$list] = 1;
+             }
+           }
+       }
+       //Process the list names 
+       if(!empty($lists_processed)){
+          $lists_multiple = array_merge($lists_processed, $lists_multiple);
+       }
+       //Sailthru object
+       $sailthru = sailthru_client_get_client();
+       if(is_object($sailthru)){
+          //Get the email in the form
+          $emails = _sailthru_batch_submit_check_for_email($form_state['input']['submitted']);
+          if(empty($lists)){
+             $lists = $form_state['complete form']['submitted']['source_list']['#value'];
+             $lists_multiple = _sailthru_process_list_array($lists);
+          }
+          //Set different source names depending on the form
+          if(!empty($lists)){
+             if($form['#node']->title == 'Access Free E-Book'){
+                $source = 'REG';
+             }
+			 if($form['#node']->title == 'Access Free E-Book 2'){
+                 $source = 'REGP';
+             }
+			 if($form['#node']->title == 'Subscribe to Our Newsletters'){
+                 $source = 'nr-main';
+             }
+			 if($form['#node']->title == 'Marfeel Subscribe to Our Newsletters'){
+                 $source = 'marfeel';
+             }
+             if($form['#node']->title == 'E-Mail Newsletters'){
+                 $source = 'WEB';
+             }
+             if($form['#node']->type == 'petitions'){
+                 $template = $form_state['complete form']['submitted']['template'];
+                 $source = 'PET';
+                 $response =$sailthru->apiPost('event', 
+                  array(
+                      'template' => $template, 
+   			          'event' => 'New_Petition', 
+   			          'id' => $emails
+   		              )
+                  );
+               }
+               $first_name = $form_state['complete form']['submitted']['first_name'];  
+               //Make our posts to Sailthru here
+               if(!empty($source) && empty($first_name)):     
+                  $response = $sailthru->apiPost('user',
+                   array('id' => $emails,
+                        'optout_email'=>'none',
+                        'key'=>'email',
+                        'vars' => array(
+                           'source' => $source,
+                         ),
+                        'lists' => $lists_multiple
+                        )
+                     );
+                     if(!empty($source) && !empty($first_name)):
+                         $response = $sailthru->apiPost('user',
+                            array('id' => $emails,
+                            'optout_email'=>'none',
+                            'key'=>'email',
+                            'vars' => array(
+                            'source' => $source,
+                            'first_name' => $first_name,
+                             ),
+                             'lists' => $lists_multiple
+                             )
+                           );
+                       } 
+                       else {
+                          $response = $sailthru->apiPost('user',
+                           array('id' => $emails,
+                             'key'=>'email',
+                             'vars' => array(
+                             'source' => 'WEB',
+                              ),
+                              'lists' => $lists_multiple
+                             )
+                         );
+                    }
+              }
+         }
+         //If we get an error response log error message   
+         if (!$response['ok'] || !empty($response['errormsg'])){
+           _sailthru_log_error_msg($response['errormsg']);
+        } 
+    }    
+}
+
+/*
+ * Process jquery webform request to sailthru
+*/
+function sailthru_submit_jquery_webforms() {
+    $to = urldecode($_POST['to']);
+	$keymail = urldecode($_POST['keymail']);
+	$source_list = urldecode($_POST['source_list']);
+    $sailthru = sailthru_client_get_client();
+    if(is_object($sailthru) && $source_list){
+   	   switch ($keymail){
+	      case 'dislike':
+		     $title = "Dislike Form";
+		   break;
+	       case 'like':
+	          $title = "Like Form";
+	       break;
+	    }
+     if($title):
+  	    //Get the most recently submitted webform
+		$query = new EntityFieldQuery();
+		$entities = $query->entityCondition('entity_type', 'node')
+		->propertyCondition('type', 'webform')
+		->propertyCondition('title', $title)
+		->propertyCondition('status', 1)
+		->range(0,1)
+		->execute();
+		if (!empty($entities['node'])){
+			$node = node_load(array_shift(array_keys($entities['node'])));
+			$nid = $node->nid;
+		}
+	}
+    $components = $node->webform['components'];
+    $lists = _sailthru_get_list($components,'form_key','source_list');
+    if($lists){
+       $lists_multiple = _sailthru_process_list_array($lists);
+        if(!empty($lists)){
+             //Make our post to sailthru here
+             $response = $sailthru->apiPost('user',
+                      array('id' => $to,
+                            'key'=>'email',
+                            'vars' => array(
+                               'source' => 'WEB',
+                             ),
+                             'lists' => $lists_multiple
+                             )
+                        );
+            }
+       }
+       //If we get an error response log error message   
+      if (!$response['ok'] || $response['errormsg']){
+         _sailthru_log_error_msg($response['errormsg']);
+      }
+   }
+}

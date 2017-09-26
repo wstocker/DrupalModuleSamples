@@ -1,0 +1,15 @@
+<?php
+
+/**
+ * @file
+ * Provides install, updated, and uninstall functions for solvemedia.
+ */
+
+/**
+ * Implementation of hook_uninstall().
+ */
+function solvemedia_uninstall() {
+   // Delete all the adcopy variables and then clear the variable cache  
+   db_query("delete from {variable} where name like 'adcopy_%'", array());
+   cache_clear_all('variables', 'cache');
+}

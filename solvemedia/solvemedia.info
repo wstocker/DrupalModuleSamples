@@ -1,0 +1,11 @@
+name = 'Solve Media'
+description = "Uses the Solve Media captcha replacement widget to secure and monetize your Drupal site API Reporting."
+dependencies[] = captcha
+package = "Spam control"
+core = 7.x
+version = "7.x-1.2"
+configure = admin/config/people/captcha/solvemedia
+
+files[] = solvemedia.admin.inc
+files[] = solvemedia.module
+files[] = solvemedia.install
