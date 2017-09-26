@@ -1,5 +1,5 @@
 name = Sailthru
-description = Integration Between the Sailthru API and National Review
+description = Integration Between the Sailthru API and (Company Website)
 php = 7.0
 core = 7.x
 
