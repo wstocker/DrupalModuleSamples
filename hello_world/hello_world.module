@@ -1,0 +1,67 @@
+<?php
+/**
+ * @file
+ * Enables custom display for content type, Hello Wold Articles.
+ */
+
+/**
+ * Implements hook_theme().
+*/
+function hello_world_theme($existing, $type, $theme, $path) {
+  // Theme function.
+  return [
+    'hello_world_block' => [
+      'variables' => [
+        'title' => NULL,
+        'links' => NULL,
+      ],
+    ],
+    'content_title' => [
+      'variables' => [
+        'title' => NULL,
+      ],
+    ],
+    'page__hello_world_article' => [
+      'variables' => [
+        'title' => NULL,
+      ],
+    ],
+  ];
+}
+
+/**
+ * Implements hook_preprocess_page().
+ */
+function hello_world_preprocess_page__hello_world_article(&$variables) {
+  //Render 'hello world block' from module block plugin and set variables for page template.
+  $hello_world_block = \Drupal::service('plugin.manager.block')->createInstance('hello_world_block', []); 
+  $variables['page']['hello_world_block']= $hello_world_block->build();    
+}
+
+/**
+ * Implements hook_node_view().
+ */
+function hello_world_node_view(array &$build, \Drupal\Core\Entity\EntityInterface $entity, \Drupal\Core\Entity\Display\EntityViewDisplayInterface $display, $view_mode) {
+  if ($entity->getType() == 'hello_world_article') {
+    // Set array to render content title template.
+    $content_title = array (
+      '#theme' => 'content_title',
+    );
+    // Render the template to markup.
+    $content_title = \Drupal::service('renderer')->render($content_title);
+    $build['body'][0]['#text'] = $content_title . $build['body'][0]['#text'];
+    // Attach custom CSS library.
+    $build['#attached']['library'][] = 'hello_world/hello_world_lib';
+  }
+}
+
+/**
+ * Implements hook_theme_suggestions_HOOK_alter().
+ */
+function hello_world_theme_suggestions_page_alter(array &$suggestions, array $variables) {
+  // If node, looks for a page template matching content type name.
+  if ($node = \Drupal::routeMatch()->getParameter('node')) {
+    $content_type = $node->bundle();
+    $suggestions[] = 'page__'.$content_type;  
+  }
+}

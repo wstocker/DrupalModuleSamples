@@ -1,0 +1,5 @@
+hello_world_lib:
+  version: 1.x
+  css:
+    layout:
+      css/custom-hello-world.css: {}

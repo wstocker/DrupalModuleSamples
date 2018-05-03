@@ -1,0 +1,11 @@
+/*
+This file is for custom CSS overrides in Content type: Hello World Articles.
+*/
+
+.field--name-body p:first-child {
+  font-style: italic;
+}
+
+.block-hello-world h2 {
+  font-weight: bold;
+}
